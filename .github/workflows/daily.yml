@@ -1,0 +1,54 @@
+name: 每日币圈&彩票报告
+
+on:
+  schedule:
+    - cron: '0 2 * * *'     # 每天10:00 UTC (18:00 CST) - 加密货币
+    - cron: '0 12 * * 0,1,3,4,6'  # 双色球开奖日 20:00 CST
+    - cron: '0 11 * * 1,3,6'      # 大乐透开奖日 19:00 CST
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '运行模式'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - crypto-only
+          - lottery-only
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: 🪙 获取加密货币行情
+        if: ${{ github.event.inputs.mode != 'lottery-only' }}
+        run: python scripts/crypto_prices.py
+        continue-on-error: true
+
+      - name: 🎰 获取彩票开奖结果
+        if: ${{ github.event.inputs.mode != 'crypto-only' }}
+        run: python scripts/lottery.py
+        continue-on-error: true
+
+      - name: 📤 推送飞书通知
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+        run: python scripts/send_feishu.py
+
+      - name: 📦 上传数据到仓库
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add *.json 2>/dev/null || true
+          git diff --cached --quiet || (git commit -m "Update data $(date +%Y-%m-%d)" && git push)
